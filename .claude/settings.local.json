@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find . -name \"README.md\" -exec wc -l {} \\\\;)",
+      "Bash(grep -E \"\\\\.\\(c|h\\)$\")",
+      "Bash(grep -E \"\\\\.\\(hpp|cpp\\)$\")"
+    ]
+  }
+}
