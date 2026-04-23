@@ -63,24 +63,24 @@ Uart* findInstance(UART_HandleTypeDef* handle) noexcept
     return nullptr;
 }
 
-UartStatus translateHalStatus(HAL_StatusTypeDef status) noexcept
+ReturnCode translateHalStatus(HAL_StatusTypeDef status) noexcept
 {
     switch (status)
     {
-        case HAL_OK:      return UartStatus::Ok;
-        case HAL_BUSY:    return UartStatus::Busy;
-        case HAL_TIMEOUT: return UartStatus::Timeout;
-        default:          return UartStatus::ErrorGeneral;
+        case HAL_OK:      return ReturnCode::AnsweredRequest;
+        case HAL_BUSY:    return ReturnCode::FunctionBusy;
+        case HAL_TIMEOUT: return ReturnCode::ErrorTimeout;
+        default:          return ReturnCode::ErrorGeneral;
     }
 }
 
-UartStatus translateHalError(uint32_t error_code) noexcept
+UartEvent translateHalError(uint32_t error_code) noexcept
 {
-    if ((error_code & HAL_UART_ERROR_PE)  != 0U) { return UartStatus::ErrorParity;  }
-    if ((error_code & HAL_UART_ERROR_NE)  != 0U) { return UartStatus::ErrorNoise;   }
-    if ((error_code & HAL_UART_ERROR_FE)  != 0U) { return UartStatus::ErrorFraming; }
-    if ((error_code & HAL_UART_ERROR_ORE) != 0U) { return UartStatus::ErrorOverrun; }
-    return UartStatus::ErrorGeneral;
+    if ((error_code & HAL_UART_ERROR_PE)  != 0U) { return UartEvent::ErrorParity;  }
+    if ((error_code & HAL_UART_ERROR_NE)  != 0U) { return UartEvent::ErrorNoise;   }
+    if ((error_code & HAL_UART_ERROR_FE)  != 0U) { return UartEvent::ErrorFraming; }
+    if ((error_code & HAL_UART_ERROR_ORE) != 0U) { return UartEvent::ErrorOverrun; }
+    return UartEvent::ErrorGeneral;
 }
 
 } // anonymous namespace
@@ -105,7 +105,7 @@ Uart::~Uart() noexcept
 
 // ---- Blocking transfers ---------------------------------------------------
 
-UartStatus Uart::write(ConstByteArray& data, uint32_t timeout_ms) noexcept
+ReturnCode Uart::write(ConstByteArray& data, uint32_t timeout_ms) noexcept
 {
     const auto status = HAL_UART_Transmit(
         &m_handle,
@@ -115,7 +115,7 @@ UartStatus Uart::write(ConstByteArray& data, uint32_t timeout_ms) noexcept
     return translateHalStatus(status);
 }
 
-UartStatus Uart::read(ByteArray& data, uint32_t timeout_ms) noexcept
+ReturnCode Uart::read(ByteArray& data, uint32_t timeout_ms) noexcept
 {
     const auto status = HAL_UART_Receive(
         &m_handle,
@@ -127,7 +127,7 @@ UartStatus Uart::read(ByteArray& data, uint32_t timeout_ms) noexcept
 
 // ---- Interrupt transfers --------------------------------------------------
 
-UartStatus Uart::writeInterrupt(ConstByteArray& data, SerialMode /*mode*/) noexcept
+ReturnCode Uart::writeInterrupt(ConstByteArray& data, UartMode mode) noexcept
 {
     const auto status = HAL_UART_Transmit_IT(
         &m_handle,
@@ -136,11 +136,11 @@ UartStatus Uart::writeInterrupt(ConstByteArray& data, SerialMode /*mode*/) noexc
     return translateHalStatus(status);
 }
 
-UartStatus Uart::readInterrupt(ByteArray& data, SerialMode mode) noexcept
+ReturnCode Uart::readInterrupt(ByteArray& data, UartMode mode) noexcept
 {
     HAL_StatusTypeDef status;
 
-    if (mode == SerialMode::ToIdle)
+    if (mode == UartMode::ToIdle)
     {
         status = HAL_UARTEx_ReceiveToIdle_IT(
             &m_handle,
@@ -160,7 +160,7 @@ UartStatus Uart::readInterrupt(ByteArray& data, SerialMode mode) noexcept
 
 // ---- DMA transfers --------------------------------------------------------
 
-UartStatus Uart::writeDMA(ConstByteArray& data, SerialMode /*mode*/) noexcept
+ReturnCode Uart::writeDMA(ConstByteArray& data, UartMode /*mode*/) noexcept
 {
     const auto status = HAL_UART_Transmit_DMA(
         &m_handle,
@@ -169,11 +169,11 @@ UartStatus Uart::writeDMA(ConstByteArray& data, SerialMode /*mode*/) noexcept
     return translateHalStatus(status);
 }
 
-UartStatus Uart::readDMA(ByteArray& data, SerialMode mode) noexcept
+ReturnCode Uart::readDMA(ByteArray& data, UartMode mode) noexcept
 {
     HAL_StatusTypeDef status;
 
-    if (mode == SerialMode::ToIdle)
+    if (mode == UartMode::ToIdle)
     {
         status = HAL_UARTEx_ReceiveToIdle_DMA(
             &m_handle,
@@ -193,13 +193,13 @@ UartStatus Uart::readDMA(ByteArray& data, SerialMode mode) noexcept
 
 // ---- Abort ----------------------------------------------------------------
 
-UartStatus Uart::abortWrite() noexcept
+ReturnCode Uart::abortWrite() noexcept
 {
     const auto status = HAL_UART_AbortTransmit_IT(&m_handle);
     return translateHalStatus(status);
 }
 
-UartStatus Uart::abortRead() noexcept
+ReturnCode Uart::abortRead() noexcept
 {
     const auto status = HAL_UART_AbortReceive_IT(&m_handle);
     return translateHalStatus(status);
@@ -214,7 +214,7 @@ void Uart::setCallback(UartCallback callback) noexcept
 
 // ---- Internal event handler -----------------------------------------------
 
-void Uart::handleEvent(UartStatus event, uint16_t count)
+void Uart::handleEvent(UartEvent event, uint16_t count)
 {
     m_callback(event, count);
 }
@@ -233,7 +233,7 @@ void HAL_UART_TxHalfCpltCallback(UART_HandleTypeDef* huart)
     Uart* inst = findInstance(huart);
     if (inst != nullptr)
     {
-        inst->handleEvent(UartStatus::TxHalfComplete, huart->TxXferSize / 2U);
+        inst->handleEvent(UartEvent::TxHalfComplete, huart->TxXferSize / 2U);
     }
 }
 
@@ -242,7 +242,7 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef* huart)
     Uart* inst = findInstance(huart);
     if (inst != nullptr)
     {
-        inst->handleEvent(UartStatus::TxComplete, huart->TxXferSize);
+        inst->handleEvent(UartEvent::TxComplete, huart->TxXferSize);
     }
 }
 
@@ -251,7 +251,7 @@ void HAL_UART_RxHalfCpltCallback(UART_HandleTypeDef* huart)
     Uart* inst = findInstance(huart);
     if (inst != nullptr)
     {
-        inst->handleEvent(UartStatus::RxHalfComplete, huart->RxXferSize / 2U);
+        inst->handleEvent(UartEvent::RxHalfComplete, huart->RxXferSize / 2U);
     }
 }
 
@@ -260,7 +260,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef* huart)
     Uart* inst = findInstance(huart);
     if (inst != nullptr)
     {
-        inst->handleEvent(UartStatus::RxComplete, huart->RxXferSize);
+        inst->handleEvent(UartEvent::RxComplete, huart->RxXferSize);
     }
 }
 
@@ -270,18 +270,18 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef* huart, uint16_t Size)
     Uart* inst = findInstance(huart);
     if (inst == nullptr) { return; }
 
-    UartStatus event;
+    UartEvent event;
     switch (huart->RxEventType)
     {
         case HAL_UART_RXEVENT_HT:
-            event = UartStatus::RxHalfComplete;
+            event = UartEvent::RxHalfComplete;
             break;
         case HAL_UART_RXEVENT_IDLE: // fall through
         case HAL_UART_RXEVENT_TC:
-            event = UartStatus::RxComplete;
+            event = UartEvent::RxComplete;
             break;
         default:
-            event = UartStatus::RxComplete;
+            event = UartEvent::RxComplete;
             break;
     }
 
@@ -293,7 +293,7 @@ void HAL_UART_AbortCpltCallback(UART_HandleTypeDef* huart)
     Uart* inst = findInstance(huart);
     if (inst != nullptr)
     {
-        inst->handleEvent(UartStatus::AbortComplete, 0U);
+        inst->handleEvent(UartEvent::AbortComplete, 0U);
     }
 }
 
@@ -302,7 +302,7 @@ void HAL_UART_AbortTransmitCpltCallback(UART_HandleTypeDef* huart)
     Uart* inst = findInstance(huart);
     if (inst != nullptr)
     {
-        inst->handleEvent(UartStatus::AbortComplete, 0U);
+        inst->handleEvent(UartEvent::AbortComplete, 0U);
     }
 }
 
@@ -311,7 +311,7 @@ void HAL_UART_AbortReceiveCpltCallback(UART_HandleTypeDef* huart)
     Uart* inst = findInstance(huart);
     if (inst != nullptr)
     {
-        inst->handleEvent(UartStatus::AbortComplete, 0U);
+        inst->handleEvent(UartEvent::AbortComplete, 0U);
     }
 }
 

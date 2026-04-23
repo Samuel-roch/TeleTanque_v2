@@ -13,7 +13,7 @@
 #ifndef DEVICES_ESP_AT_ESP32BASICCMDS_HPP_
 #define DEVICES_ESP_AT_ESP32BASICCMDS_HPP_
 
-#include "esp_at_commons.hpp"
+#include <hel_return_code>
 
 namespace hel
 {
@@ -25,8 +25,7 @@ class Esp32BasicCmds
 public:
   Esp32BasicCmds(EspAt& m_at_client);
 
-
-  EspAtStatus at();
+  ReturnCode at();
 
 private:
   EspAt& m_at_client;

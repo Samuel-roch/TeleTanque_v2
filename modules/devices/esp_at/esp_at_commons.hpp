@@ -16,13 +16,6 @@ namespace hel
 
 constexpr const char* kExpectedOk = "OK\r\n";
 
-enum class EspAtStatus
-{
-  Ok,
-  Error,
-  Timeout,
-  Unknown
-};
 
 } /* namespace dev */
 

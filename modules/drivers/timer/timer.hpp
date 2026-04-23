@@ -62,7 +62,7 @@ public:
    * @return @ref TimerStatus::ErrorGeneral on HAL fault.
    */
   [[nodiscard]]
-  TimerStatus start(uint32_t period_us, TimerMode mode) noexcept override;
+   ReturnCode start(uint32_t period_us, TimerMode mode) noexcept override;
 
   /**
    * @brief  Stop the timer immediately.
@@ -72,7 +72,7 @@ public:
    * @return @ref TimerStatus::NotInitialized if the timer was already stopped.
    */
   [[nodiscard]]
-  TimerStatus stop() noexcept override;
+   ReturnCode stop() noexcept override;
 
   /**
    * @brief  Reset the counter and overflow accumulator to zero.
@@ -83,7 +83,7 @@ public:
    * @return @ref TimerStatus::NotInitialized if the timer is not running.
    */
   [[nodiscard]]
-  TimerStatus reset() noexcept override;
+   ReturnCode reset() noexcept override;
 
   // -------------------------------------------------------------------------
   // Measurement

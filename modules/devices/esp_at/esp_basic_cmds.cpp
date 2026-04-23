@@ -22,11 +22,14 @@ Esp32BasicCmds::Esp32BasicCmds(EspAt& m_at_client)
 }
 
 
-EspAtStatus Esp32BasicCmds::at()
+ReturnCode Esp32BasicCmds::at()
 {
   // AT: Test AT Startup
   m_at_client.txBuffer() << "AT\r\n";
 
-  m_at_client.execCommand(kExpectedOk);
+  auto rc = m_at_client.execCommand(kExpectedOk);
+
+  return rc;
+}
 
 } /* namespace drv */
