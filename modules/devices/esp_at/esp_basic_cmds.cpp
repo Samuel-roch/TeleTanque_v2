@@ -9,6 +9,8 @@
  ******************************************************************************
  */
 #include "esp_basic_cmds.hpp"
+#include "esp_at_commons.hpp"
+
 #include "esp_at.hpp"
 
 namespace hel
