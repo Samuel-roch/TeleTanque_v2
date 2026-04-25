@@ -80,7 +80,7 @@ KernelStatus stop() noexcept
  * @param[in] ms  Duration in milliseconds. Zero yields without sleeping.
  * @note      Must not be called from an ISR context.
  */
-void delay(TickType ms) noexcept
+void sleep(TickType ms) noexcept
 {
     vTaskDelay(pdMS_TO_TICKS(ms));
 }

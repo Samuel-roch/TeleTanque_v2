@@ -22,7 +22,6 @@
 /* Includes ------------------------------------------------------------------*/
 #include "fmc.h"
 #include <stdlib.h>
-
 /* USER CODE BEGIN 0 */
 
 /*============================================================================*/
@@ -530,8 +529,8 @@ void MX_FMC_Init(void)
   /* SdramTiming */
   SdramTiming.LoadToActiveDelay = 2;
   SdramTiming.ExitSelfRefreshDelay = 7;
-  SdramTiming.SelfRefreshTime = 11;
-  SdramTiming.RowCycleDelay = 16;
+  SdramTiming.SelfRefreshTime = 4;
+  SdramTiming.RowCycleDelay = 4;
   SdramTiming.WriteRecoveryTime = 2;
   SdramTiming.RPDelay = 4;
   SdramTiming.RCDDelay = 4;

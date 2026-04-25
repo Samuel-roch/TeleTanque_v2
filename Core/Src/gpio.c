@@ -138,12 +138,12 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : LCD_SPI_CS_Pin ESP_RST_Pin */
-  GPIO_InitStruct.Pin = LCD_SPI_CS_Pin|ESP_RST_Pin;
+  /*Configure GPIO pin : LCD_SPI_CS_Pin */
+  GPIO_InitStruct.Pin = LCD_SPI_CS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+  HAL_GPIO_Init(LCD_SPI_CS_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LCD_SPI_CLK_Pin LCD_SPI_MOSI_Pin LCD_RESET_Pin */
   GPIO_InitStruct.Pin = LCD_SPI_CLK_Pin|LCD_SPI_MOSI_Pin|LCD_RESET_Pin;
@@ -176,6 +176,13 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   GPIO_InitStruct.Alternate = GPIO_AF12_SDMMC1;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : ESP_RST_Pin */
+  GPIO_InitStruct.Pin = ESP_RST_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(ESP_RST_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : ENC_BT_B_Pin */
   GPIO_InitStruct.Pin = ENC_BT_B_Pin;

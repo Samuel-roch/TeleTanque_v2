@@ -21,12 +21,27 @@
 #ifndef APPLICATION_SETUP_HPP_
 #define APPLICATION_SETUP_HPP_
 
+// Library FreeRTOS
 #include "freertos/task.hpp"
 
-constexpr hel::UBaseType kNetworkStackSize = 512U;
+// Helios Drivers
+#include "uart/uart.hpp"
+#include "gpio/gpio.hpp"
 
-constexpr size_t kEspAtBuffSize   = 512;
-constexpr size_t kEspAtURCBufSize    = 256;
-constexpr size_t kEspAtUrcListSize  = 10;
+// HAL Drivers
+#include "usart.h"
+#include "gpio.h"
+
+constexpr hel::UBaseType kNetworkStackSize = 512U;
+constexpr hel::UBaseType kTeletanqueStackSize = 512U;
+
+class BSP final
+{
+public:
+
+  static inline hel::Uart esp32_at {huart5};
+  static inline hel::Gpio enable_ldo  {IoPortPin::PF10};
+  static inline hel::Gpio esp32_reset {IoPortPin::PD4};
+};
 
 #endif /* APPLICATION_SETUP_HPP_ */

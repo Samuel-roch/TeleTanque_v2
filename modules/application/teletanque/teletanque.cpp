@@ -8,21 +8,23 @@
  *
  ******************************************************************************
  */
-#include "network.hpp"
+#include "teletanque.hpp"
 
 using namespace hel;
 
-Network::Network() noexcept :
+Teletanque& s_Teletanque = Teletanque::instance();
+
+Teletanque::Teletanque() noexcept :
     StaticTask("Network", TaskPriority::Normal)
-    , m_at_client(BSP::esp32_at, BSP::esp32_reset)
 {
 
 }
 
-void Network::run() noexcept
+void Teletanque::run() noexcept
 {
   while (true)
   {
+
     sleep(100);
   }
 }

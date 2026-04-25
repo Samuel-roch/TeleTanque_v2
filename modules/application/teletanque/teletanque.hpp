@@ -10,33 +10,31 @@
  *
  ******************************************************************************
  */
-#ifndef APPLICATION_NETWORK_NETWORK_HPP_
-#define APPLICATION_NETWORK_NETWORK_HPP_
+#ifndef APPLICATION_TELETANQUE_TELETANQUE_HPP_
+#define APPLICATION_TELETANQUE_TELETANQUE_HPP_
 
 #include <hel_target>
-#include <hel_string>
-
-#include "esp_at/esp_at.hpp"
+#include "network/network.hpp"
 #include "setup.hpp"
 
-class Network :
-  public hel::StaticTask<kNetworkStackSize>
+class Teletanque :
+  public hel::StaticTask<kTeletanqueStackSize>
 {
 public:
 
-  static Network& instance() noexcept
+  static Teletanque& instance() noexcept
   {
-    static Network instance;
+    static Teletanque instance;
     return instance;
   }
 
 private:  // Methods
-  explicit Network() noexcept;
+  explicit Teletanque() noexcept;
   void run() noexcept override;
 
 private: // Members
-  hel::EspAt m_at_client;
+  Network& m_network = Network::instance();
 
 };
 
-#endif /* APPLICATION_NETWORK_NETWORK_HPP_ */
+#endif /* APPLICATION_TELETANQUE_TELETANQUE_HPP_ */
