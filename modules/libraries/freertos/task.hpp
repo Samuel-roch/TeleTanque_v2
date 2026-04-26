@@ -239,7 +239,7 @@ public:
      * @warning   Must be called from the task's own @ref run() context only.
      */
     [[nodiscard]]
-    bool notifyTake(TickType timeoutMs) noexcept override
+    bool notifyTake(TickType timeoutMs = portMAX_DELAY) noexcept override
     {
         return ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(timeoutMs)) > 0u;
     }

@@ -78,24 +78,30 @@ ReturnCode translateHalStatus(HAL_StatusTypeDef status) noexcept
   }
 }
 
-UartEvent translateHalError(uint32_t error_code) noexcept
+UartEvent translateHalError(UART_HandleTypeDef* huart) noexcept
 {
-  if ((error_code & HAL_UART_ERROR_PE) != 0U)
+  if ((huart->ErrorCode & HAL_UART_ERROR_PE) != 0U)
   {
     return UartEvent::ErrorParity;
   }
-  if ((error_code & HAL_UART_ERROR_NE) != 0U)
+  if ((huart->ErrorCode & HAL_UART_ERROR_NE) != 0U)
   {
     return UartEvent::ErrorNoise;
   }
-  if ((error_code & HAL_UART_ERROR_FE) != 0U)
+  if ((huart->ErrorCode & HAL_UART_ERROR_FE) != 0U)
   {
     return UartEvent::ErrorFraming;
   }
-  if ((error_code & HAL_UART_ERROR_ORE) != 0U)
+  if ((huart->ErrorCode & HAL_UART_ERROR_ORE) != 0U)
   {
     return UartEvent::ErrorOverrun;
   }
+
+  __HAL_UART_CLEAR_PEFLAG(huart);
+  __HAL_UART_CLEAR_NEFLAG(huart);
+  __HAL_UART_CLEAR_FEFLAG(huart);
+  __HAL_UART_CLEAR_OREFLAG(huart);
+
   return UartEvent::ErrorGeneral;
 }
 
@@ -121,26 +127,26 @@ Uart::~Uart() noexcept
 
 // ---- Blocking transfers ---------------------------------------------------
 
-ReturnCode Uart::write(ConstByteArray& data, uint32_t timeout_ms) noexcept
+ReturnCode Uart::write(ByteArray& data, uint32_t timeout_ms) noexcept
 {
   const auto status = HAL_UART_Transmit(&m_handle, data.data(),
-      static_cast<uint16_t>(data.size()), timeout_ms);
+      static_cast<uint16_t>(data.capacity()), timeout_ms);
   return translateHalStatus(status);
 }
 
 ReturnCode Uart::read(ByteArray& data, uint32_t timeout_ms) noexcept
 {
   const auto status = HAL_UART_Receive(&m_handle, data.data(),
-      static_cast<uint16_t>(data.size()), timeout_ms);
+      static_cast<uint16_t>(data.capacity()), timeout_ms);
   return translateHalStatus(status);
 }
 
 // ---- Interrupt transfers --------------------------------------------------
 
-ReturnCode Uart::writeInterrupt(ConstByteArray& data, UartMode mode) noexcept
+ReturnCode Uart::writeInterrupt(ByteArray& data, UartMode mode) noexcept
 {
   const auto status = HAL_UART_Transmit_IT(&m_handle, data.data(),
-      static_cast<uint16_t>(data.size()));
+      static_cast<uint16_t>(data.capacity()));
   return translateHalStatus(status);
 }
 
@@ -151,12 +157,12 @@ ReturnCode Uart::readInterrupt(ByteArray& data, UartMode mode) noexcept
   if (mode == UartMode::ToIdle)
   {
     status = HAL_UARTEx_ReceiveToIdle_IT(&m_handle, data.data(),
-        static_cast<uint16_t>(data.size()));
+        static_cast<uint16_t>(data.capacity()));
   }
   else
   {
     status = HAL_UART_Receive_IT(&m_handle, data.data(),
-        static_cast<uint16_t>(data.size()));
+        static_cast<uint16_t>(data.capacity()));
   }
 
   return translateHalStatus(status);
@@ -164,10 +170,10 @@ ReturnCode Uart::readInterrupt(ByteArray& data, UartMode mode) noexcept
 
 // ---- DMA transfers --------------------------------------------------------
 
-ReturnCode Uart::writeDMA(ConstByteArray& data, UartMode /*mode*/) noexcept
+ReturnCode Uart::writeDMA(ByteArray& data, UartMode /*mode*/) noexcept
 {
   const auto status = HAL_UART_Transmit_DMA(&m_handle, data.data(),
-      static_cast<uint16_t>(data.size()));
+      static_cast<uint16_t>(data.capacity()));
   return translateHalStatus(status);
 }
 
@@ -178,12 +184,12 @@ ReturnCode Uart::readDMA(ByteArray& data, UartMode mode) noexcept
   if (mode == UartMode::ToIdle)
   {
     status = HAL_UARTEx_ReceiveToIdle_DMA(&m_handle, data.data(),
-        static_cast<uint16_t>(data.size()));
+        static_cast<uint16_t>(data.capacity()));
   }
   else
   {
     status = HAL_UART_Receive_DMA(&m_handle, data.data(),
-        static_cast<uint16_t>(data.size()));
+        static_cast<uint16_t>(data.capacity()));
   }
 
   return translateHalStatus(status);
@@ -321,7 +327,7 @@ extern "C"
     Uart *inst = findInstance(huart);
     if (inst != nullptr)
     {
-      inst->handleEvent(translateHalError(huart->ErrorCode), 0U);
+      inst->handleEvent(translateHalError(huart), 0U);
     }
   }
 

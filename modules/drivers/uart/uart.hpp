@@ -37,7 +37,7 @@ public:
    * @return @ref ReturnCode::kErrorHardware on peripheral fault.
    */
   [[nodiscard]]
-  ReturnCode write(ConstByteArray& data, uint32_t timeout_ms) noexcept override;
+  ReturnCode write(ByteArray& data, uint32_t timeout_ms) noexcept override;
 
   /**
    * @brief  Receive exactly `data.size()` bytes, blocking until done or timeout.
@@ -64,7 +64,7 @@ public:
    * @return @ref ReturnCode::kErrorHardware on peripheral fault.
    */
   [[nodiscard]]
-   ReturnCode writeInterrupt(ConstByteArray& data, UartMode mode) noexcept override;
+   ReturnCode writeInterrupt(ByteArray& data, UartMode mode) noexcept override;
 
   /**
    * @brief  Receive data asynchronously using interrupts or DMA.
@@ -86,7 +86,7 @@ public:
    * @return @ref ReturnCode::kErrorHardware on peripheral fault.
    */
   [[nodiscard]]
-  ReturnCode writeDMA(ConstByteArray& data, UartMode mode) noexcept override;
+  ReturnCode writeDMA(ByteArray& data, UartMode mode) noexcept override;
 
   /**
    * @brief  Receive data asynchronously using DMA.

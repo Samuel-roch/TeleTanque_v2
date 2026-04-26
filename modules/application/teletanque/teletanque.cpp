@@ -22,9 +22,14 @@ Teletanque::Teletanque() noexcept :
 
 void Teletanque::run() noexcept
 {
+  BSP::enable_ldo.write(true);
+  sleep(50); // Allow LDO to stabilize before accessing peripherals.
+
+  m_network.notify();
+
   while (true)
   {
-
-    sleep(100);
+    BSP::led.toggle();
+    sleep(500);
   }
 }

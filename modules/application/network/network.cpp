@@ -21,6 +21,11 @@ Network::Network() noexcept :
 
 void Network::run() noexcept
 {
+  (void)TaskBase::notifyTake();
+
+  m_at_client.notify();
+
+
   while (true)
   {
     sleep(100);

@@ -39,8 +39,10 @@ class BSP final
 {
 public:
 
-  static inline hel::Uart esp32_at {huart5};
   static inline hel::Gpio enable_ldo  {IoPortPin::PF10};
+  static inline hel::Gpio led {IoPortPin::PG3};
+
+  static inline UART_handle& esp32_at {huart2};
   static inline hel::Gpio esp32_reset {IoPortPin::PD4};
 };
 

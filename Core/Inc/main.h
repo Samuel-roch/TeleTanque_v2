@@ -65,6 +65,10 @@ void Error_Handler(void);
 #define ENC_BT_Pin GPIO_PIN_0
 #define ENC_BT_GPIO_Port GPIOA
 #define ENC_BT_EXTI_IRQn EXTI0_IRQn
+#define GPRS_TX_Pin GPIO_PIN_12
+#define GPRS_TX_GPIO_Port GPIOB
+#define GPRS_RX_Pin GPIO_PIN_13
+#define GPRS_RX_GPIO_Port GPIOB
 #define LTE_PWK_Pin GPIO_PIN_14
 #define LTE_PWK_GPIO_Port GPIOB
 #define LTE_RST_Pin GPIO_PIN_15

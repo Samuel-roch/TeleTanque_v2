@@ -29,8 +29,8 @@ ReturnCode Esp32BasicCmds::at()
   // AT: Test AT Startup
   m_at_client.txBuffer() << "AT\r\n";
 
+  // Expect "OK\r\n" in response to the AT command.
   auto rc = m_at_client.execCommand(kExpectedOk);
-
   return rc;
 }
 
