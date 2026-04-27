@@ -26,21 +26,24 @@
 #include "freertos/task.hpp"
 #include "freertos/queue.hpp"
 
+#include "esp_at_commons.hpp"
 #include "esp_basic_cmds.hpp"
 #include "esp_wifi_cmds.hpp"
 
 namespace hel
 {
 
-constexpr size_t kEsp32StackSize = 256;
-
 class EspAt :
-  public StaticTask<kEsp32StackSize>, Uart
+  public StaticTask<ESP::kEsp32StackSize>, Uart
 {
 public:
 
   // Constructor takes a UART handle for communication and a GPIO reference for resetting the ESP32.
   EspAt(UART_handle& handle, Gpio& resetPin);
+
+  ReturnCode connectWiFi(String& ssid, String& password) noexcept;
+
+
 
   enum class Event
   {
@@ -52,34 +55,32 @@ public:
     ListAp
   };
 
+  using Esp32Callback = Callback<void(Event, uint16_t)>;
+
   // Accessor for the temporary TX buffer.
-  String& txBuffer() noexcept { return m_temp_string; }
+  String& txBuffer() noexcept
+  {
+    m_tx_string.clear();
+    return m_tx_string;
+  }
+
+  String& rxBuffer() noexcept
+  {
+    return m_rx_string;
+  }
 
   // Execute an AT command and wait for the expected response.
   ReturnCode execCommand(const char* expected_response, uint32_t timeout_ms =
-      kDefaultTimeoutMs) noexcept;
+      ESP::kDefaultTimeoutMs) noexcept;
 
 
-private: // Constants
-   static constexpr std::size_t kFsmTransitionsCapacity = 10U;
+private: // Types
 
-   static constexpr uint32_t kDefaultTimeoutMs = 2000U;
-
-   static constexpr size_t kBuffSize = 256U;
-
-   static constexpr size_t kEspAtUrcListSize = 6U;
-   static constexpr size_t kEspAtUrcQueueSize = 2U;
-
-   enum // FSM trigger events
-   {
-     TriggerInit,
-     TriggerReady,
-     TriggerIdle,
-     TriggerCommand,
-     TriggerBusy,
-     TriggerSuccess,
-     TriggerError
-   };
+  struct Command
+  {
+    ESP::CommandType                    type;
+    ESP::RawStringBuffer<ESP::kBuffSize> payload;
+  };
 
    /** @brief Associates a URC search key with its dispatch callback. */
    struct Esp32AtEvent
@@ -89,22 +90,28 @@ private: // Constants
    };
 
 private: // Members
-  hel::FSM<EspAt, kFsmTransitionsCapacity> m_fsm;
+
+  hel::FSM<EspAt, ESP::kFsmTransitionsCapacity> m_fsm;
   Gpio &m_resetPin;
 
-  Esp32AtEvent m_urc_entries[kEspAtUrcListSize]; /*!< Registered URC key/callback pairs. */
+  Esp32AtEvent m_urc_entries[ESP::kEspAtUrcListSize]; /*!< Registered URC key/callback pairs. */
   std::size_t m_urc_count; /*!< Number of registered URC entries. */
 
   Esp32BasicCmds m_basic_cmds { *this };
 
   // DMA receive buffer and current RX frame.
-  StringData<kBuffSize>m_rx_string;
+  StringData<ESP::kBuffSize>m_rx_string;
+  StringData<ESP::kBuffSize>m_tx_string;
 
   // Temporary buffer for building AT command strings before transmission.
-  StringData<kBuffSize>m_temp_string;
+  Command m_temp_command;
 
   // Mailbox for URC messages from ISR to task context.
-  StaticQueue<StringData<kBuffSize>, kEspAtUrcQueueSize> m_urc_buffer;
+  StaticQueue<ESP::RawStringBuffer<ESP::kBuffSize>, ESP::kEspAtUrcQueueSize> m_urc_buffer;
+
+  // Queue for pending commands to be processed by the FSM.
+  StaticQueue<Command, ESP::kEspCmdQueueSize> m_command_queue;
+
 
   // FSM states
   FSMState<EspAt>m_state_init;
@@ -112,25 +119,33 @@ private: // Members
   FSMState<EspAt>m_state_busy;
   FSMState<EspAt>m_state_error;
 
-  //
-  Pit m_cmd_timeout; /*!< Timeout for command responses. */
-  volatile bool m_waiting_for_response = false; /*!< Set by waitForResponse, cleared by ISR. */
+  // Timer for command timeouts, used in waitForResponse and state transitions.
+  Pit m_cmd_timeout;
 
-  bool m_ready; /*!< Indicates if the ESP32 is ready after reset. */
-  bool m_connected; /*!< Tracks Wi-Fi connection status. */
+  // Flag indicating whether waitForResponse.
+  volatile bool m_waiting_for_response = false;
+  // Flags for tracking ESP32 status based on URC events.
+  bool m_ready;
 
-private: // Methods
+  // Flag indicating Wi-Fi connection status.
+  bool m_wifi_connected;
+
+  StringData<10> m_module_version;
+
+private: // Inherited methods
 
   // Task entry point. Called by FreeRTOS when the task is scheduled.
   void run() noexcept override;
+
+  // UART event handler registered as the UartCallback.
+  void handleEvent(UartEvent event, uint16_t count) noexcept;
+
+private: // Internal methods
 
   void reset() noexcept;
 
   // Process any pending URC messages in the mailbox.
   void processURC() noexcept;
-
-  // UART event handler registered as the UartCallback.
-  void handleEvent(UartEvent event, uint16_t count) noexcept;
 
   // Wait for a specific response string to be received, with a timeout.
   ReturnCode waitForResponse(const char* expected_response, uint32_t timeout_ms) noexcept;

@@ -39,235 +39,302 @@ namespace hel
  *          All other methods must be called from task context only.
  */
 template<class T>
-class QueueBase : public iQueue<T>
+class QueueBase :
+  public iQueue<T>
 {
 public:
 
-    // -------------------------------------------------------------------------
-    // Send
-    // -------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // Send
+  // -------------------------------------------------------------------------
 
-    /**
-     * @brief     Post an item to the back of the queue from task context.
-     * @param[in] item        Item to copy into the queue.
-     * @param[in] timeout_ms  Maximum wait time if the queue is full (ms).
-     *                        Pass @c UINT32_MAX to wait indefinitely.
-     * @return    @ref QueueStatus::Ok      Item posted.
-     * @return    @ref QueueStatus::Full    Queue full and @p timeout_ms elapsed.
-     * @return    @ref QueueStatus::Timeout Timeout expired before space appeared.
-     * @return    @ref QueueStatus::Error   Handle is null.
-     */
-    [[nodiscard]]
-    QueueStatus sendToBack(const T& item, uint32_t timeout_ms) noexcept override
+  /**
+   * @brief     Post an item to the back of the queue from task context.
+   * @param[in] item        Item to copy into the queue.
+   * @param[in] timeout_ms  Maximum wait time if the queue is full (ms).
+   *                        Pass @c UINT32_MAX to wait indefinitely.
+   * @return    @ref ReturnCode::AnsweredRequest      Item posted.
+   * @return    @ref ReturnCode::Full    Queue full and @p timeout_ms elapsed.
+   * @return    @ref ReturnCode::ErrorTimeout Timeout expired before space appeared.
+   * @return    @ref ReturnCode::Error   Handle is null.
+   */
+  [[nodiscard]]
+  ReturnCode sendToBack(const T& item, uint32_t timeout_ms = UINT32_MAX) noexcept override
+  {
+    if (m_handle == nullptr)
     {
-        if (m_handle == nullptr) { return QueueStatus::Error; }
-        const TickType ticks = toTicks(timeout_ms);
-        const BaseType rc    = xQueueSendToBack(m_handle, &item, ticks);
-        if (rc == pdTRUE)              { return QueueStatus::Ok; }
-        if (count() >= m_capacity)     { return QueueStatus::Full; }
-        return QueueStatus::Timeout;
+      return ReturnCode::ErrorNullPointer;
     }
-
-    /**
-     * @brief     Post an item to the back of the queue from ISR context.
-     * @param[in] item  Item to copy into the queue.
-     * @return    @ref QueueStatus::Ok   Item posted.
-     * @return    @ref QueueStatus::Full Queue has no space.
-     * @return    @ref QueueStatus::Error Handle is null.
-     */
-    [[nodiscard]]
-    QueueStatus sendToBackFromIsr(const T& item) noexcept override
+    const TickType ticks = toTicks(timeout_ms);
+    const BaseType rc = xQueueSendToBack(m_handle, &item, ticks);
+    if (rc == pdTRUE)
     {
-        if (m_handle == nullptr) { return QueueStatus::Error; }
-        BaseType xHPTW = pdFALSE;
-        const BaseType rc = xQueueSendToBackFromISR(m_handle, &item, &xHPTW);
-        portYIELD_FROM_ISR(xHPTW);
-        return (rc == pdTRUE) ? QueueStatus::Ok : QueueStatus::Full;
+      return ReturnCode::AnsweredRequest;
     }
-
-    /**
-     * @brief     Post an item to the front of the queue from task context.
-     * @param[in] item        Item to copy.
-     * @param[in] timeout_ms  Maximum wait time if full (ms).
-     * @return    @ref QueueStatus::Ok / Full / Timeout / Error.
-     */
-    [[nodiscard]]
-    QueueStatus sendToFront(const T& item, uint32_t timeout_ms) noexcept override
+    if (count() >= m_capacity)
     {
-        if (m_handle == nullptr) { return QueueStatus::Error; }
-        const TickType ticks = toTicks(timeout_ms);
-        const BaseType rc    = xQueueSendToFront(m_handle, &item, ticks);
-        if (rc == pdTRUE)          { return QueueStatus::Ok; }
-        if (count() >= m_capacity) { return QueueStatus::Full; }
-        return QueueStatus::Timeout;
+      return ReturnCode::ErrorQueueFull;
     }
+    return ReturnCode::ErrorTimeout;
+  }
 
-    /**
-     * @brief     Post an item to the front of the queue from ISR context.
-     * @param[in] item  Item to copy.
-     * @return    @ref QueueStatus::Ok / Full / Error.
-     */
-    [[nodiscard]]
-    QueueStatus sendToFrontFromIsr(const T& item) noexcept override
+  /**
+   * @brief     Post an item to the back of the queue from ISR context.
+   * @param[in] item  Item to copy into the queue.
+   * @return    @ref ReturnCode::AnsweredRequest   Item posted.
+   * @return    @ref ReturnCode::Full Queue has no space.
+   * @return    @ref ReturnCode::Error Handle is null.
+   */
+  [[nodiscard]]
+  ReturnCode sendToBackFromIsr(const T& item) noexcept override
+  {
+    if (m_handle == nullptr)
     {
-        if (m_handle == nullptr) { return QueueStatus::Error; }
-        BaseType xHPTW = pdFALSE;
-        const BaseType rc = xQueueSendToFrontFromISR(m_handle, &item, &xHPTW);
-        portYIELD_FROM_ISR(xHPTW);
-        return (rc == pdTRUE) ? QueueStatus::Ok : QueueStatus::Full;
+      return ReturnCode::ErrorNullPointer;
     }
+    BaseType xHPTW = pdFALSE;
+    const BaseType rc = xQueueSendToBackFromISR(m_handle, &item, &xHPTW);
+    portYIELD_FROM_ISR(xHPTW);
+    return (rc == pdTRUE) ? ReturnCode::AnsweredRequest : ReturnCode::ErrorQueueFull;
+  }
 
-    // -------------------------------------------------------------------------
-    // Receive
-    // -------------------------------------------------------------------------
-
-    /**
-     * @brief      Retrieve an item from the front of the queue from task context.
-     * @param[out] item        Buffer that receives the copied item.
-     * @param[in]  timeout_ms  Maximum wait time if the queue is empty (ms).
-     * @return     @ref QueueStatus::Ok / Empty / Timeout / Error.
-     * @warning    Buffer content is unspecified on non-Ok return.
-     */
-    [[nodiscard]]
-    QueueStatus receive(T& item, uint32_t timeout_ms) noexcept override
+  /**
+   * @brief     Post an item to the front of the queue from task context.
+   * @param[in] item        Item to copy.
+   * @param[in] timeout_ms  Maximum wait time if full (ms).
+   * @return    @ref ReturnCode::AnsweredRequest / Full / Timeout / Error.
+   */
+  [[nodiscard]]
+  ReturnCode sendToFront(const T& item, uint32_t timeout_ms) noexcept override
+  {
+    if (m_handle == nullptr)
     {
-        if (m_handle == nullptr) { return QueueStatus::Error; }
-        const TickType ticks = toTicks(timeout_ms);
-        const BaseType rc    = xQueueReceive(m_handle, &item, ticks);
-        if (rc == pdTRUE)  { return QueueStatus::Ok; }
-        if (count() == 0u) { return QueueStatus::Empty; }
-        return QueueStatus::Timeout;
+      return ReturnCode::ErrorNullPointer;
     }
-
-    /**
-     * @brief      Retrieve an item from the front of the queue from ISR context.
-     * @param[out] item  Buffer that receives the copied item.
-     * @return     @ref QueueStatus::Ok / Empty / Error.
-     */
-    [[nodiscard]]
-    QueueStatus receiveFromISR(T& item) noexcept override
+    const TickType ticks = toTicks(timeout_ms);
+    const BaseType rc = xQueueSendToFront(m_handle, &item, ticks);
+    if (rc == pdTRUE)
     {
-        if (m_handle == nullptr) { return QueueStatus::Error; }
-        BaseType xHPTW = pdFALSE;
-        const BaseType rc = xQueueReceiveFromISR(m_handle, &item, &xHPTW);
-        portYIELD_FROM_ISR(xHPTW);
-        return (rc == pdTRUE) ? QueueStatus::Ok : QueueStatus::Empty;
+      return ReturnCode::AnsweredRequest;
     }
-
-    // -------------------------------------------------------------------------
-    // Control
-    // -------------------------------------------------------------------------
-
-    /**
-     * @brief   Reset the queue, discarding all items.
-     * @details Safe to call from task context only.
-     */
-    void reset() noexcept override
+    if (count() >= m_capacity)
     {
-        if (m_handle != nullptr)
-        {
-            xQueueReset(m_handle);
-        }
+      return ReturnCode::ErrorQueueFull;
     }
+    return ReturnCode::ErrorTimeout;
+  }
 
-    /** @brief Alias for @ref reset(). */
-    void clear() noexcept override { reset(); }
-
-    // -------------------------------------------------------------------------
-    // State queries
-    // -------------------------------------------------------------------------
-
-    /**
-     * @brief   Return the number of items currently in the queue.
-     * @return  Item count, or 0 if the handle is null.
-     */
-    [[nodiscard]]
-    uint32_t count() const noexcept override
+  /**
+   * @brief     Post an item to the front of the queue from ISR context.
+   * @param[in] item  Item to copy.
+   * @return    @ref ReturnCode::AnsweredRequest / Full / Error.
+   */
+  [[nodiscard]]
+  ReturnCode sendToFrontFromIsr(const T& item) noexcept override
+  {
+    if (m_handle == nullptr)
     {
-        if (m_handle == nullptr) { return 0u; }
-        return static_cast<uint32_t>(uxQueueMessagesWaiting(m_handle));
+      return ReturnCode::ErrorNullPointer;
     }
+    BaseType xHPTW = pdFALSE;
+    const BaseType rc = xQueueSendToFrontFromISR(m_handle, &item, &xHPTW);
+    portYIELD_FROM_ISR(xHPTW);
+    return (rc == pdTRUE) ? ReturnCode::AnsweredRequest : ReturnCode::ErrorQueueFull;
+  }
 
-    /**
-     * @brief   Return the number of items in the queue from ISR context.
-     * @return  Item count, or 0 if the handle is null.
-     */
-    [[nodiscard]]
-    uint32_t countFromISR() const noexcept override
+  // -------------------------------------------------------------------------
+  // Receive
+  // -------------------------------------------------------------------------
+
+  /**
+   * @brief      Retrieve an item from the front of the queue from task context.
+   * @param[out] item        Buffer that receives the copied item.
+   * @param[in]  timeout_ms  Maximum wait time if the queue is empty (ms).
+   * @return     @ref ReturnCode::AnsweredRequest / Empty / Timeout / Error.
+   * @warning    Buffer content is unspecified on non-Ok return.
+   */
+  [[nodiscard]]
+  ReturnCode receive(T& item, uint32_t timeout_ms) noexcept override
+  {
+    if (m_handle == nullptr)
     {
-        if (m_handle == nullptr) { return 0u; }
-        return static_cast<uint32_t>(uxQueueMessagesWaitingFromISR(m_handle));
+      return ReturnCode::ErrorNullPointer;
     }
-
-    /** @brief Return the maximum capacity of the queue. */
-    [[nodiscard]]
-    uint32_t capacity() const noexcept override { return m_capacity; }
-
-    /** @brief Return the maximum capacity of the queue (ISR-safe). */
-    [[nodiscard]]
-    uint32_t capacityFromISR() const noexcept override { return m_capacity; }
-
-    /**
-     * @brief   Check whether the queue contains no items (task context).
-     * @return  @c true if empty.
-     */
-    [[nodiscard]]
-    bool isEmpty() const noexcept override
+    const TickType ticks = toTicks(timeout_ms);
+    const BaseType rc = xQueueReceive(m_handle, &item, ticks);
+    if (rc == pdTRUE)
     {
-        if (m_handle == nullptr) { return true; }
-        return xQueueIsQueueEmptyFromISR(m_handle) == pdTRUE;
+      return ReturnCode::AnsweredRequest;
     }
-
-    /**
-     * @brief   Check whether the queue contains no items (ISR context).
-     * @return  @c true if empty.
-     */
-    [[nodiscard]]
-    bool isEmptyFromISR() const noexcept override
+    if (count() == 0u)
     {
-        if (m_handle == nullptr) { return true; }
-        return xQueueIsQueueEmptyFromISR(m_handle) == pdTRUE;
+      return ReturnCode::ErrorQueueEmpty;
     }
+    return ReturnCode::ErrorTimeout;
+  }
 
-    /**
-     * @brief   Check whether the queue has no remaining space (task context).
-     * @return  @c true if full.
-     */
-    [[nodiscard]]
-    bool isFull() const noexcept override
+  /**
+   * @brief      Retrieve an item from the front of the queue from ISR context.
+   * @param[out] item  Buffer that receives the copied item.
+   * @return     @ref ReturnCode::AnsweredRequest / Empty / Error.
+   */
+  [[nodiscard]]
+  ReturnCode receiveFromISR(T& item) noexcept override
+  {
+    if (m_handle == nullptr)
     {
-        if (m_handle == nullptr) { return false; }
-        return xQueueIsQueueFullFromISR(m_handle) == pdTRUE;
+      return ReturnCode::ErrorNullPointer;
     }
+    BaseType xHPTW = pdFALSE;
+    const BaseType rc = xQueueReceiveFromISR(m_handle, &item, &xHPTW);
+    portYIELD_FROM_ISR(xHPTW);
+    return
+        (rc == pdTRUE) ?
+            ReturnCode::AnsweredRequest : ReturnCode::ErrorQueueEmpty;
+  }
 
-    /**
-     * @brief   Check whether the queue has no remaining space (ISR context).
-     * @return  @c true if full.
-     */
-    [[nodiscard]]
-    bool isFullFromISR() const noexcept override
+  // -------------------------------------------------------------------------
+  // Control
+  // -------------------------------------------------------------------------
+
+  /**
+   * @brief   Reset the queue, discarding all items.
+   * @details Safe to call from task context only.
+   */
+  void reset() noexcept override
+  {
+    if (m_handle != nullptr)
     {
-        if (m_handle == nullptr) { return false; }
-        return xQueueIsQueueFullFromISR(m_handle) == pdTRUE;
+      xQueueReset(m_handle);
     }
+  }
+
+  /** @brief Alias for @ref reset(). */
+  void clear() noexcept override
+  {
+    reset();
+  }
+
+  // -------------------------------------------------------------------------
+  // State queries
+  // -------------------------------------------------------------------------
+
+  /**
+   * @brief   Return the number of items currently in the queue.
+   * @return  Item count, or 0 if the handle is null.
+   */
+  [[nodiscard]]
+  uint32_t count() const noexcept override
+  {
+    if (m_handle == nullptr)
+    {
+      return 0u;
+    }
+    return static_cast<uint32_t>(uxQueueMessagesWaiting(m_handle));
+  }
+
+  /**
+   * @brief   Return the number of items in the queue from ISR context.
+   * @return  Item count, or 0 if the handle is null.
+   */
+  [[nodiscard]]
+  uint32_t countFromISR() const noexcept override
+  {
+    if (m_handle == nullptr)
+    {
+      return 0u;
+    }
+    return static_cast<uint32_t>(uxQueueMessagesWaitingFromISR(m_handle));
+  }
+
+  /** @brief Return the maximum capacity of the queue. */
+  [[nodiscard]]
+  uint32_t capacity() const noexcept override
+  {
+    return m_capacity;
+  }
+
+  /** @brief Return the maximum capacity of the queue (ISR-safe). */
+  [[nodiscard]]
+  uint32_t capacityFromISR() const noexcept override
+  {
+    return m_capacity;
+  }
+
+  /**
+   * @brief   Check whether the queue contains no items (task context).
+   * @return  @c true if empty.
+   */
+  [[nodiscard]]
+  bool isEmpty() const noexcept override
+  {
+    if (m_handle == nullptr)
+    {
+      return true;
+    }
+    return xQueueIsQueueEmptyFromISR(m_handle) == pdTRUE;
+  }
+
+  /**
+   * @brief   Check whether the queue contains no items (ISR context).
+   * @return  @c true if empty.
+   */
+  [[nodiscard]]
+  bool isEmptyFromISR() const noexcept override
+  {
+    if (m_handle == nullptr)
+    {
+      return true;
+    }
+    return xQueueIsQueueEmptyFromISR(m_handle) == pdTRUE;
+  }
+
+  /**
+   * @brief   Check whether the queue has no remaining space (task context).
+   * @return  @c true if full.
+   */
+  [[nodiscard]]
+  bool isFull() const noexcept override
+  {
+    if (m_handle == nullptr)
+    {
+      return false;
+    }
+    return xQueueIsQueueFullFromISR(m_handle) == pdTRUE;
+  }
+
+  /**
+   * @brief   Check whether the queue has no remaining space (ISR context).
+   * @return  @c true if full.
+   */
+  [[nodiscard]]
+  bool isFullFromISR() const noexcept override
+  {
+    if (m_handle == nullptr)
+    {
+      return false;
+    }
+    return xQueueIsQueueFullFromISR(m_handle) == pdTRUE;
+  }
 
 protected:
 
-    QueueHandle m_handle   { nullptr }; ///< FreeRTOS queue handle; null until created.
-    uint32_t    m_capacity { 0u };      ///< Maximum item count set at creation.
+  QueueHandle m_handle { nullptr }; ///< FreeRTOS queue handle; null until created.
+  uint32_t m_capacity { 0u };      ///< Maximum item count set at creation.
 
 private:
 
-    /**
-     * @brief     Convert a millisecond timeout to FreeRTOS ticks.
-     * @param[in] ms  Timeout in ms; @c UINT32_MAX means @c portMAX_DELAY.
-     * @return    Equivalent tick count.
-     */
-    static TickType toTicks(uint32_t ms) noexcept
-    {
-        return (ms == UINT32_MAX) ? portMAX_DELAY
-                                  : static_cast<TickType>(pdMS_TO_TICKS(ms));
-    }
+  /**
+   * @brief     Convert a millisecond timeout to FreeRTOS ticks.
+   * @param[in] ms  Timeout in ms; @c UINT32_MAX means @c portMAX_DELAY.
+   * @return    Equivalent tick count.
+   */
+  static TickType toTicks(uint32_t ms) noexcept
+  {
+    return
+        (ms == UINT32_MAX) ?
+            portMAX_DELAY : static_cast<TickType>(pdMS_TO_TICKS(ms));
+  }
 };
 
 // =============================================================================
@@ -280,34 +347,33 @@ private:
  * @ingroup FREERTOS_QUEUE
  */
 template<class T>
-class DynamicQueue : public QueueBase<T>
+class DynamicQueue :
+  public QueueBase<T>
 {
 public:
 
-    /**
-     * @brief     Construct and allocate a queue with the given capacity.
-     * @param[in] capacity  Maximum number of items the queue can hold (>0).
-     */
-    explicit DynamicQueue(uint32_t capacity) noexcept
-    {
-        this->m_capacity = capacity;
-        this->m_handle   = xQueueCreate(
-            static_cast<UBaseType>(capacity),
-            static_cast<UBaseType>(sizeof(T))
-        );
-    }
+  /**
+   * @brief     Construct and allocate a queue with the given capacity.
+   * @param[in] capacity  Maximum number of items the queue can hold (>0).
+   */
+  explicit DynamicQueue(uint32_t capacity) noexcept
+  {
+    this->m_capacity = capacity;
+    this->m_handle = xQueueCreate(static_cast<UBaseType>(capacity),
+        static_cast<UBaseType>(sizeof(T)));
+  }
 
-    /**
-     * @brief   Delete the FreeRTOS queue and release its heap memory.
-     */
-    ~DynamicQueue() noexcept override
+  /**
+   * @brief   Delete the FreeRTOS queue and release its heap memory.
+   */
+  ~DynamicQueue() noexcept override
+  {
+    if (this->m_handle != nullptr)
     {
-        if (this->m_handle != nullptr)
-        {
-            vQueueDelete(this->m_handle);
-            this->m_handle = nullptr;
-        }
+      vQueueDelete(this->m_handle);
+      this->m_handle = nullptr;
     }
+  }
 };
 
 // =============================================================================
@@ -324,26 +390,23 @@ public:
  * @ingroup FREERTOS_QUEUE
  */
 template<class T, uint32_t Capacity>
-class StaticQueue : public QueueBase<T>
+class StaticQueue :
+  public QueueBase<T>
 {
 public:
 
-    /** @brief Construct the static queue (no heap allocation). */
-    StaticQueue() noexcept
-    {
-        this->m_capacity = Capacity;
-        this->m_handle   = xQueueCreateStatic(
-            static_cast<UBaseType>(Capacity),
-            static_cast<UBaseType>(sizeof(T)),
-            m_storage,
-            &m_queueBuf
-        );
-    }
+  /** @brief Construct the static queue (no heap allocation). */
+  StaticQueue() noexcept
+  {
+    this->m_capacity = Capacity;
+    this->m_handle = xQueueCreateStatic(static_cast<UBaseType>(Capacity),
+        static_cast<UBaseType>(sizeof(T)), m_storage, &m_queueBuf);
+  }
 
 private:
 
-    StaticQueueBuf m_queueBuf {};                        ///< FreeRTOS queue control block.
-    alignas(T) uint8_t m_storage[Capacity * sizeof(T)]{}; ///< Item storage buffer.
+  StaticQueueBuf m_queueBuf { };              ///< FreeRTOS queue control block.
+  alignas(T) uint8_t m_storage[Capacity * sizeof(T)] { }; ///< Item storage buffer.
 };
 
 } // namespace hel

@@ -130,7 +130,7 @@ Uart::~Uart() noexcept
 ReturnCode Uart::write(ByteArray& data, uint32_t timeout_ms) noexcept
 {
   const auto status = HAL_UART_Transmit(&m_handle, data.data(),
-      static_cast<uint16_t>(data.capacity()), timeout_ms);
+      static_cast<uint16_t>(data.size()), timeout_ms);
   return translateHalStatus(status);
 }
 
@@ -146,7 +146,7 @@ ReturnCode Uart::read(ByteArray& data, uint32_t timeout_ms) noexcept
 ReturnCode Uart::writeInterrupt(ByteArray& data, UartMode mode) noexcept
 {
   const auto status = HAL_UART_Transmit_IT(&m_handle, data.data(),
-      static_cast<uint16_t>(data.capacity()));
+      static_cast<uint16_t>(data.size()));
   return translateHalStatus(status);
 }
 
@@ -173,7 +173,7 @@ ReturnCode Uart::readInterrupt(ByteArray& data, UartMode mode) noexcept
 ReturnCode Uart::writeDMA(ByteArray& data, UartMode /*mode*/) noexcept
 {
   const auto status = HAL_UART_Transmit_DMA(&m_handle, data.data(),
-      static_cast<uint16_t>(data.capacity()));
+      static_cast<uint16_t>(data.size()));
   return translateHalStatus(status);
 }
 

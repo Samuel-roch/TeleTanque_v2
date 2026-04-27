@@ -15,6 +15,8 @@
 namespace hel
 {
 
+using namespace ESP;
+
 EspAt::EspAt(UART_handle& handle, Gpio& resetPin)
     :
     StaticTask("Esp32", TaskPriority::Normal),
@@ -45,12 +47,12 @@ EspAt::EspAt(UART_handle& handle, Gpio& resetPin)
   m_fsm.setInitialState(&m_state_init);
 
   m_ready = false;
-  m_connected = false;
+  m_wifi_connected = false;
 }
 
 void EspAt::run() noexcept
 {
-  (void)TaskBase::notifyTake();
+  (void) TaskBase::notifyTake();
 
   for ( ;; )
   {
@@ -63,15 +65,31 @@ void EspAt::run() noexcept
 void EspAt::reset() noexcept
 {
   m_ready = false;
-  m_connected = false;
+  m_wifi_connected = false;
 
-  (void)Uart::readDMA(m_rx_string, UartMode::ToIdle);
+  (void) Uart::readDMA(m_rx_string, UartMode::ToIdle);
 
   m_resetPin.write(false);
   hel::sleep(100);
   m_resetPin.write(true);
   hel::sleep(100);
 
+}
+
+ReturnCode EspAt::connectWiFi(String& ssid, String& password) noexcept
+{
+  if (m_command_queue.isFull())
+  {
+    return ReturnCode::ErrorQueueFull;
+  }
+
+  m_temp_command.type = CommandType::ConnectWiFi;
+  StringData<ESP::kBuffSize> tmp;
+  tmp << "\"" << ssid << "\",\"" << password << "\"";
+  m_temp_command.payload.count = tmp.size();
+  std::memcpy(m_temp_command.payload.data, tmp.data(), tmp.size() + 1U);
+
+  return m_command_queue.sendToBack(m_temp_command, 10);
 }
 
 // -------------------------------------------------------------------------
@@ -97,17 +115,21 @@ void EspAt::processURC() noexcept
 {
   // Check quickly under a critical section whether there is anything to do.
 
-  if (m_urc_buffer.receive(m_temp_string, 10) != QueueStatus::Ok)
+  ESP::RawStringBuffer<ESP::kBuffSize> urc_buf;
+  if (m_urc_buffer.receive(urc_buf, 10) != ReturnCode::AnsweredRequest)
   {
     return;
   }
 
-  if (m_temp_string.empty())
+  m_tx_string.clear();
+  m_tx_string.append(urc_buf.data, urc_buf.count);
+
+  if (m_tx_string.empty())
   {
     return;
   }
 
-  if (m_temp_string.trim(" \t\r\n") == false)
+  if (m_tx_string.trim(" \t\r\n") == false)
   {
     return;
   }
@@ -115,9 +137,11 @@ void EspAt::processURC() noexcept
   // Dispatch to the first matching callback.
   for ( std::size_t i = 0U; i < m_urc_count; ++i )
   {
-    if (std::strstr(m_temp_string.c_str(), m_urc_entries[i].key) != nullptr)
+    if (std::strstr(m_tx_string.c_str(), m_urc_entries[i].key)
+        != nullptr)
     {
-      (this->*(m_urc_entries[i].callback))(m_temp_string);
+      (this->*(m_urc_entries[i].callback))(m_tx_string);
+      m_tx_string.clear();
       return;
     }
   }
@@ -146,7 +170,7 @@ void EspAt::handleEvent(UartEvent event, uint16_t count) noexcept
 
   if (event != UartEvent::RxComplete)
   {
-    (void)Uart::readDMA(m_rx_string, UartMode::ToIdle);
+    (void) Uart::readDMA(m_rx_string, UartMode::ToIdle);
     return;
   }
 
@@ -165,7 +189,10 @@ void EspAt::handleEvent(UartEvent event, uint16_t count) noexcept
     else
     {
       // Queue as URC; processURC() will consume it from task context.
-      (void) m_urc_buffer.sendToBackFromIsr(m_rx_string);
+      ESP::RawStringBuffer<ESP::kBuffSize> urc_buf;
+      urc_buf.count = m_rx_string.size();
+      std::memcpy(urc_buf.data, m_rx_string.data(), urc_buf.count + 1U);
+      (void) m_urc_buffer.sendToBackFromIsr(urc_buf);
     }
   }
 
@@ -199,21 +226,20 @@ void EspAt::handleEvent(UartEvent event, uint16_t count) noexcept
 ReturnCode EspAt::execCommand(
   const char* expected_response, uint32_t timeout_ms) noexcept
 {
-  if (m_temp_string.empty())
+  if (m_tx_string.empty())
   {
     return ReturnCode::ErrorGeneral;
   }
-  if (m_temp_string.remaining() < 2U)
+  if (m_tx_string.remaining() < 2U)
   {
     return ReturnCode::ErrorGeneral;
   }
+
+  m_tx_string << "\r\n";
 
   m_rx_string.clear();
-  m_temp_string << "\r\n";
-
-  ByteArray tx_view(m_temp_string);
-  const ReturnCode rc = Uart::write(tx_view, kDefaultTimeoutMs);
-  m_temp_string.clear();
+  const ReturnCode rc = Uart::write(m_tx_string, kDefaultTimeoutMs);
+  m_tx_string.clear();
 
   if (rc != ReturnCode::AnsweredRequest)
   {
@@ -263,7 +289,7 @@ ReturnCode EspAt::waitForResponse(
 // Event Rady: Triggered when the ESP32 signals it is ready after reset.
 void EspAt::onReady(String& msg)
 {
-  if(msg.contains("ready"))
+  if (msg.contains("ready"))
   {
     m_ready = true;
   }
@@ -305,7 +331,7 @@ void EspAt::onListAp(String& msg)
 void EspAt::enterStateInit()
 {
   reset();
-  m_cmd_timeout.start(kDefaultTimeoutMs);
+  m_cmd_timeout.start(kinitTimeoutMs);
 }
 
 void EspAt::onStateInit()
@@ -313,6 +339,20 @@ void EspAt::onStateInit()
   if (m_ready)
   {
     // Transition to Idle state on ready event.
+
+    auto rc = m_basic_cmds.setEcho(false);
+
+    sleep(100);
+
+    float temperature;
+    rc = m_basic_cmds.getTemperature(temperature);
+
+    if (rc != ReturnCode::AnsweredRequest)
+    {
+      m_fsm.trigger(TriggerError);
+      return;
+    }
+
     m_fsm.trigger(TriggerReady);
   }
   else if (m_cmd_timeout.expired())
@@ -324,7 +364,10 @@ void EspAt::onStateInit()
 
 void EspAt::onStateIdle()
 {
-
+  if (!m_command_queue.isEmpty())
+  {
+    m_fsm.trigger(TriggerCommand);
+  }
 }
 
 void EspAt::enterStateBusy()
@@ -334,7 +377,41 @@ void EspAt::enterStateBusy()
 
 void EspAt::onStateBusy()
 {
+  if (m_command_queue.receive(m_temp_command, 10)
+      == ReturnCode::AnsweredRequest)
+  {
+    switch (m_temp_command.type)
+    {
+      case CommandType::ConnectWiFi :
+      {
+        const std::size_t string_size = 20U;
+        StringData<string_size>ssid;
+        StringData<string_size>password;
 
+        StringData<ESP::kBuffSize> payload_str;
+        payload_str.append(m_temp_command.payload.data,
+                           m_temp_command.payload.count);
+        if (payload_str.scanf("%19[^\"]\",\"%19[^\"]\"",
+            ssid.c_str(), password.c_str()) > 1)
+        {
+          const ReturnCode ret = connectWiFi(ssid, password);
+          if (ret == ReturnCode::AnsweredRequest)
+          {
+            m_fsm.trigger(TriggerSuccess);
+          }
+          else
+          {
+            m_fsm.trigger(TriggerError);
+            break;
+          }
+        }
+
+      } break;
+
+      default :
+        break;
+    }
+  }
 }
 
 //State Error: State entered on error conditions, may attempt recovery or wait for reset.

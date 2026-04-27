@@ -26,6 +26,9 @@ public:
   Esp32BasicCmds(EspAt& m_at_client);
 
   ReturnCode at();
+  ReturnCode reset();
+  ReturnCode setEcho(bool enable);
+  ReturnCode getTemperature(float& temperature);
 
 private:
   EspAt& m_at_client;
