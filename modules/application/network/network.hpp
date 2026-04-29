@@ -30,12 +30,27 @@ public:
     return instance;
   }
 
+
+
+private: //  Constants
+  static constexpr uint32_t kRunIntervalMs = 10000U; // Main loop interval 10s.
+  static inline const char * kWifiSsid = "S25";
+  static inline const char * kWifiPassword = "12345678";
+
+private: // Members
+  hel::EspAt m_esp_at;
+
+  bool m_esp_wifi_connected;
+  bool m_esp_ready;
+
+
 private:  // Methods
   explicit Network() noexcept;
   void run() noexcept override;
 
-private: // Members
-  hel::EspAt m_at_client;
+  void onEspAtEvent(hel::EspAt::Event event, hel::String& data) noexcept;
+
+
 
 };
 

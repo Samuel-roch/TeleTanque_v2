@@ -26,56 +26,50 @@ constexpr size_t kEsp32StackSize = 512;
 constexpr const char *kExpectedOk = "OK\r\n";
 
 // Timing constants for command execution and FSM timeouts.
+static constexpr uint32_t kSmallDelayMs = 50U;
 static constexpr uint32_t kDefaultTimeoutMs = 2000U;
 static constexpr uint32_t kinitTimeoutMs = 5000U;
+static constexpr uint32_t kListApTimeout = 15000U;
 
-static constexpr std::size_t kFsmTransitionsCapacity = 10U;
-static constexpr size_t kBuffSize = 256U;
+static constexpr size_t kBuffSize = 512;
 static constexpr size_t kEspAtUrcListSize = 6U;
 static constexpr size_t kEspAtUrcQueueSize = 3U;
-static constexpr size_t kEspCmdQueueSize = 3U;
-
-enum // FSM trigger events
-{
-  TriggerInit,
-  TriggerReady,
-  TriggerIdle,
-  TriggerCommand,
-  TriggerBusy,
-  TriggerSuccess,
-  TriggerError
-};
 
 /**
- * @brief POD buffer for safe RTOS queue storage of string data.
- * @details FreeRTOS queues use memcpy internally, which breaks any object
- *          that contains a self-referencing pointer (like StringData). This
- *          struct stores only raw bytes and a count so it is safe to memcpy.
+ * @brief   Wi-Fi station connection state reported by AT+CWSTATE.
  */
-template<std::size_t N>
-struct RawStringBuffer
+enum class WiFiState : uint8_t
 {
-  char        data[N];
-  std::size_t count;
+  NotStarted     = 0U, /*!< Wi-Fi not initialized (AT+CWINIT=0)           */
+  ConnectedNoIP  = 1U, /*!< Connected to AP but IP not yet obtained       */
+  ConnectedWithIP = 2U,/*!< Connected to AP and IP obtained               */
+  Connecting     = 3U, /*!< Connection in progress (AT+CWJAP executing)   */
+  Disconnected   = 4U  /*!< Disconnected from AP                          */
 };
 
-enum class CommandType
+enum class ApMode : uint8_t
 {
-  Reset,
-  ConnectWiFi,
-  DisconnectWiFi,
-  GetTime,
-  ConnectMqtt,
-  DisconnectMqtt,
-  PublishMqtt,
-  SubscribeMqtt,
-  UnsubscribeMqtt,
-  ListAp
+  Off          = 0U, /*!< Wi-Fi disabled                                   */
+  Station      = 1U, /*!< Station mode (STA)                               */
+  SoftAP       = 2U, /*!< SoftAP mode                                      */
+  StationSoftAP = 3U /*!< Concurrent Station + SoftAP mode                 */
 };
 
 
-} // namespace esp_at
 
-} /* namespace dev */
+/**
+ * @brief   UTC offset value for SNTP configuration.
+ * @details The ESP32 AT firmware accepts the timezone as an integer that
+ *          encodes the UTC offset in one of two ways:
+ *          - Whole-hour offsets: pass the number of hours directly
+ *            (e.g. @c -5 for UTC-05:00, @c 8 for UTC+08:00).
+ *          - Sub-hour offsets: pass hours * 100 + minutes
+ *            (e.g. @c 530 for UTC+05:30, @c 1245 for UTC+12:45).
+ */
+using TimeZone = int16_t;
+
+} // namespace ESP
+
+} // namespace hel
 
 #endif /* DEVICES_ESP_AT_COMMONS_HPP_ */

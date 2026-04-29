@@ -15,7 +15,7 @@
 namespace
 {
 using namespace hel;
-constexpr uint8_t kMaxInstances = 8U;
+constexpr uint8_t kMaxInstances = _HEL_UART_COUNT;
 
 struct RegistryEntry
 {

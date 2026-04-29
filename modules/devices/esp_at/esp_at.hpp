@@ -1,11 +1,26 @@
 /**
  ******************************************************************************
- * @file
+ * @file    esp_at.hpp
  * @author  Samuel Almeida Rocha
- * @version
- * @date
- * @ingroup
- * @brief   
+ * @version 0.1.0
+ * @date    2026-04-27
+ * @ingroup HELIOS_DEV_ESP_AT
+ * @brief   ESP32 AT-command driver — Wi-Fi, TCP/IP and MQTT.
+ *
+ * @details
+ *   - Drives an ESP32 module via UART using the official ESP-AT firmware.
+ *   - Implements a FreeRTOS task that processes unsolicited result codes (URCs)
+ *     and exposes synchronous command methods to the caller.
+ *   - All blocking methods busy-wait internally; they must be called from task
+ *     context only — never from ISR.
+ *   - Commands serialize through a single TX buffer (@ref m_tx_string); they
+ *     are therefore NOT re-entrant.  Call from a single owner task or guard
+ *     with a mutex.
+ *   - URC dispatch uses a FreeRTOS queue that is written from ISR and drained
+ *     from task context.
+ *
+ * @note    Requires UART DMA-to-idle reception already configured by the
+ *          caller before @ref EspAt is constructed.
  *
  ******************************************************************************
  */
@@ -14,9 +29,10 @@
 #define DEVICES_ESP_AT_ESP_AT_HPP_
 
 // Helios includes
-#include <hel_fsm>
 #include <hel_pit>
 #include <hel_string>
+#include <hel_span>
+#include <hel_calendar>
 
 // Drivers includes
 #include "uart/uart.hpp"
@@ -27,166 +43,284 @@
 #include "freertos/queue.hpp"
 
 #include "esp_at_commons.hpp"
-#include "esp_basic_cmds.hpp"
-#include "esp_wifi_cmds.hpp"
 
 namespace hel
 {
 
+/**
+ * @brief   ESP32 AT-command driver.
+ * @details
+ *   - Inherits @ref StaticTask to run its own FreeRTOS task.
+ *   - Inherits @ref Uart for UART DMA send / receive.
+ *   - Exposes synchronous Wi-Fi, TCP/IP and MQTT command methods.
+ * @ingroup HELIOS_DEV_ESP_AT
+ */
 class EspAt :
   public StaticTask<ESP::kEsp32StackSize>, Uart
 {
 public:
 
-  // Constructor takes a UART handle for communication and a GPIO reference for resetting the ESP32.
+  // Construct bound to @p handle for UART I/O and @p resetPin for hard reset.
   EspAt(UART_handle& handle, Gpio& resetPin);
-
-  ReturnCode connectWiFi(String& ssid, String& password) noexcept;
-
-
-
+  /**
+   * @brief   Application-level events fired by URC handlers.
+   */
   enum class Event
   {
-    Ready,
-    WiFiConnected,
-    Time,
-    MqttConnected,
-    MqttRecv,
-    ListAp
+    Ready,              /*!< Module has reset and is ready to receive commands    */
+    WiFiConnection,      /*!< Station connected to an AP ("WIFI CONNECTED")       */
+    TimeUpdated,               /*!< SNTP time synchronised ("TIME_UPDATED")             */
+    MqttConnected,      /*!< MQTT broker connection state changed                */
+    MqttRecv,           /*!< Inbound MQTT message received on a subscribed topic */
+    ListAp              /*!< One AP entry returned by AT+CWLAP scan              */
   };
 
-  using Esp32Callback = Callback<void(Event, uint16_t)>;
+  // Type alias for application-level event callbacks.
+  using EventCallback = Callback<void(Event, String&)>;
 
-  // Accessor for the temporary TX buffer.
-  String& txBuffer() noexcept
+  enum class ApEncryption : uint8_t
   {
-    m_tx_string.clear();
-    return m_tx_string;
-  }
+    Open = 0U, /*!< No encryption (open network)                     */
+    WEP  = 1U, /*!< WEP encryption                                  */
+    WPA_PSK = 2U, /*!< WPA-PSK encryption                             */
+    WPA2_PSK = 3U, /*!< WPA2-PSK encryption                            */
+    WPA_WPA2_PSK = 4U, /*!< WPA/WPA2 mixed-mode PSK encryption             */
+    WPA2_ENTERPRISE = 5U, /*!< WPA2 Enterprise encryption                    */
+    WPA3_PSK = 6U, /*!< WPA3-PSK encryption                             */
+    WPA2_WPA3_PSK = 7U, /*!< WPA2/WPA3 mixed-mode PSK encryption            */
+    WAPI_PSK = 8U, /*!< WAPI-PSK encryption                            */
+    OWE = 9U, /*!< OWE (Opportunistic Wireless Encryption)         */
+    WPA3_ENT_192 = 10U, /*!< WPA3 Enterprise with 192-bit security         */
+    WPA3_EXT_PSK = 11U, /*!< WPA3 with external PSK (e.g. from DPP)        */
+    WPA3_EXT_PSK_MIXED_MODE = 12U, /*!< Mixed-mode WPA3 with external PSK        */
+    DPP = 13U, /*!< DPP (Device Provisioning Protocol)              */
+    WPA3_ENTERPRISE = 14U, /*!< WPA3 Enterprise with EAP authentication       */
+    WPA2_WPA3_ENTERPRISE = 15U /*!< Mixed-mode WPA2/WPA3 Enterprise with EAP   */
+  };
 
-  String& rxBuffer() noexcept
+  struct ApInfo
   {
-    return m_rx_string;
-  }
+    char ssid[33] = { }; // 32 chars + null terminator
+    uint8_t rssi;           /*!< Signal strength 0 (weak) to 100 (strong) */
+    ApEncryption encryption; /*!< Encryption type (see @ref ApEncryption) */
+  };
 
-  // Execute an AT command and wait for the expected response.
-  ReturnCode execCommand(const char* expected_response, uint32_t timeout_ms =
-      ESP::kDefaultTimeoutMs) noexcept;
+
+  // ---------------------------------------------------------------------------
+  // Wi-Fi management commands
+  // ---------------------------------------------------------------------------
+
+  // Get Wifi driver status.
+  [[nodiscard]] ReturnCode getWiFiStatus(bool& enabled) noexcept;
+
+  // Initialize (enable=true) or deinitialize (enable=false) the Wi-Fi driver.
+  [[nodiscard]] ReturnCode enableWiFi(bool enable) noexcept;
+
+  // Set the Wi-Fi operating mode (Station, SoftAP, or both).
+  [[nodiscard]] ReturnCode setWiFiMode(ESP::ApMode mode) noexcept;
+
+  // Connect the ESP32 station to an AP; waits up to 15 s for "OK".
+  [[nodiscard]] ReturnCode connectWiFi(String ssid, String password) noexcept;
+
+  // Disconnect the ESP32 station from the AP.
+  [[nodiscard]] ReturnCode disconnectWiFi() noexcept;
+
+  // Query the current Wi-Fi connection state via AT+CWSTATE.
+  [[nodiscard]] ReturnCode wiFiStatus(ESP::WiFiState& state) noexcept;
+
+  // Query SSID, BSSID and RSSI of the connected AP via AT+CWJAP?.
+  [[nodiscard]] ReturnCode getApInfo(
+    String& ssid, String& bssid, int& rssi, bool& is_secure) noexcept;
+
+  // Obtain the IP address of a station connected to the ESP32 SoftAP.
+  [[nodiscard]] ReturnCode getIpAddress(String& ip) noexcept;
+
+  // Start an AP scan (AT+CWLAP); results arrive as ListAp URC events.
+  [[nodiscard]] ReturnCode listAp(Span<EspAt::ApInfo> ap_array, uint8_t& count) noexcept;
+
+  // Read the ESP32 internal temperature sensor.
+  [[nodiscard]] ReturnCode getTemperature(float& temperature) noexcept;
+
+  // ---------------------------------------------------------------------------
+  // TCP / IP commands
+  // ---------------------------------------------------------------------------
+
+  // Configure the SNTP time zone and server (AT+CIPSNTPCFG).
+  [[nodiscard]] ReturnCode setTimeZoneAndSNTP(
+    ESP::TimeZone tz, String& sntp_server) noexcept;
+
+  // Ping a remote host and return on the first reply or timeout.
+  [[nodiscard]] ReturnCode ping(String& host, uint32_t timeout_ms) noexcept;
+
+  // ---------------------------------------------------------------------------
+  // MQTT commands
+  // ---------------------------------------------------------------------------
+
+  // Set MQTT scheme and client ID via AT+MQTTUSERCFG (username/password empty).
+  [[nodiscard]] ReturnCode setMqttUserConfig(
+    int scheme, const char* client_id) noexcept;
+
+  // Set a long MQTT client ID via AT+MQTTLONGCLIENTID (two-phase protocol).
+  [[nodiscard]] ReturnCode setMqttClientId(String& client_id) noexcept;
+
+  // Set a long MQTT username via AT+MQTTLONGUSERNAME (two-phase protocol).
+  [[nodiscard]] ReturnCode setMqttUsername(String& username) noexcept;
+
+  // Set a long MQTT password via AT+MQTTLONGPASSWORD (two-phase protocol).
+  [[nodiscard]] ReturnCode setMqttPassword(String& password) noexcept;
+
+  // Connect to an MQTT broker via AT+MQTTCONN.
+  [[nodiscard]] ReturnCode mqttConnect(
+    String& endpoint, uint16_t port) noexcept;
+
+  // Publish an MQTT message as a quoted string via AT+MQTTPUB.
+  [[nodiscard]] ReturnCode mqttPublish(
+    String& topic, String& msg) noexcept;
+
+  // Publish a raw binary MQTT payload via AT+MQTTPUBRAW (two-phase protocol).
+  [[nodiscard]] ReturnCode mqttPublishRaw(
+    String& topic, uint8_t* msg, size_t len) noexcept;
+
+  // Subscribe to an MQTT topic via AT+MQTTSUB (QoS 0).
+  [[nodiscard]] ReturnCode mqttSubscribe(String& topic) noexcept;
+
+  // Unsubscribe from an MQTT topic via AT+MQTTUNSUB.
+  [[nodiscard]] ReturnCode mqttUnsubscribe(String& topic) noexcept;
+
+  // Close the MQTT connection and free resources via AT+MQTTCLEAN.
+  [[nodiscard]] ReturnCode mqttCLose() noexcept;
+
+  void setEventCallback(EventCallback callback) noexcept
+  {
+    m_event_callback = callback;
+  }
 
 
 private: // Types
 
-  struct Command
-  {
-    ESP::CommandType                    type;
-    ESP::RawStringBuffer<ESP::kBuffSize> payload;
-  };
-
-   /** @brief Associates a URC search key with its dispatch callback. */
-   struct Esp32AtEvent
-   {
-     const char *key;                              ///< The event string key
-     alignas(void*) void (EspAt::*callback)(String &);         ///< Pointer to the member function
-   };
-
 private: // Members
 
-  hel::FSM<EspAt, ESP::kFsmTransitionsCapacity> m_fsm;
-  Gpio &m_resetPin;
-
-  Esp32AtEvent m_urc_entries[ESP::kEspAtUrcListSize]; /*!< Registered URC key/callback pairs. */
-  std::size_t m_urc_count; /*!< Number of registered URC entries. */
-
-  Esp32BasicCmds m_basic_cmds { *this };
+  Gpio& m_resetPin;
 
   // DMA receive buffer and current RX frame.
-  StringData<ESP::kBuffSize>m_rx_string;
-  StringData<ESP::kBuffSize>m_tx_string;
+  char m_rx_buffer[ESP::kBuffSize];
+  String m_rx_string { m_rx_buffer };
 
-  // Temporary buffer for building AT command strings before transmission.
-  Command m_temp_command;
+  // Buffer for constructing outgoing AT command strings.
+  char m_tx_buffer[ESP::kBuffSize];
+  String m_tx_string { m_tx_buffer };
+
+  // Scratch buffer for ISR-to-task URC copies.
+  char m_temp_buffer[ESP::kBuffSize];
 
   // Mailbox for URC messages from ISR to task context.
-  StaticQueue<ESP::RawStringBuffer<ESP::kBuffSize>, ESP::kEspAtUrcQueueSize> m_urc_buffer;
+  StaticQueue<char[ESP::kBuffSize], ESP::kEspAtUrcQueueSize> m_urc_buffer;
 
-  // Queue for pending commands to be processed by the FSM.
-  StaticQueue<Command, ESP::kEspCmdQueueSize> m_command_queue;
-
-
-  // FSM states
-  FSMState<EspAt>m_state_init;
-  FSMState<EspAt>m_state_idle;
-  FSMState<EspAt>m_state_busy;
-  FSMState<EspAt>m_state_error;
-
-  // Timer for command timeouts, used in waitForResponse and state transitions.
+  // Timer for command timeouts and FSM state transitions.
   Pit m_cmd_timeout;
 
-  // Flag indicating whether waitForResponse.
+  EventCallback m_event_callback;
+
+  // Set true by waitForResponse; cleared from ISR when a frame arrives.
   volatile bool m_waiting_for_response = false;
-  // Flags for tracking ESP32 status based on URC events.
-  bool m_ready;
 
-  // Flag indicating Wi-Fi connection status.
-  bool m_wifi_connected;
+  bool m_ready;         ///< True after "ready" URC received.
+  bool m_initialized;   ///< True after successful stateInit sequence.
+  bool m_wifi_connected; ///< True when "WIFI CONNECTED" URC received.
+  bool m_mqtt_connected; ///< True when "+MQTTCONNECTED:0" URC received.
 
-  StringData<10> m_module_version;
+private: // Inherited — task entry point
 
-private: // Inherited methods
-
-  // Task entry point. Called by FreeRTOS when the task is scheduled.
+  // FreeRTOS task body.
   void run() noexcept override;
 
-  // UART event handler registered as the UartCallback.
+  // UART event callback (called from ISR context).
   void handleEvent(UartEvent event, uint16_t count) noexcept;
 
-private: // Internal methods
+private: // Internal command helpers
 
+  // Hard-reset the ESP32 and clear all state flags.
   void reset() noexcept;
 
-  // Process any pending URC messages in the mailbox.
+  // Drain the URC mailbox and dispatch each pending message.
   void processURC() noexcept;
 
-  // Wait for a specific response string to be received, with a timeout.
-  ReturnCode waitForResponse(const char* expected_response, uint32_t timeout_ms) noexcept;
+  /**
+   * @brief   Append "\r\n", transmit @ref m_tx_string and wait for one frame.
+   * @details Single-frame variant: returns as soon as the first non-CRLF
+   *          frame arrives.  Use @ref execCommandMulti for commands that
+   *          produce intermediate frames before the final "OK".
+   */
+  [[nodiscard]] ReturnCode execCommand(
+    const char* expected_response = nullptr,
+    uint32_t    timeout_ms = ESP::kDefaultTimeoutMs) noexcept;
 
-  // Event Rady: Triggered when the ESP32 signals it is ready after reset.
-  void onReady(String& msg);
+  /**
+   * @brief   Like @ref execCommand but keeps waiting across intermediate frames.
+   * @details Continues re-arming the wait loop when a frame is received that
+   *          does not match @p expected_response and does not contain "ERROR".
+   *          Use this for AT+CWJAP, AT+MQTTCONN, AT+CWLAP, etc.
+   */
+  [[nodiscard]] ReturnCode execCommandMulti(
+    const char* expected_response,
+    uint32_t    timeout_ms = ESP::kDefaultTimeoutMs) noexcept;
 
-  // Event Connect: Triggered on Wi-Fi connection status changes (e.g., "WIFI CONNECTED").
-  void onConnected(String& msg);
 
-  // Event Time: Triggered when the ESP32 reports the current time (e.g., "TIME: ...").
-  void onTimeUpdated(String& msg);
+  /**
+   * @brief   Send raw bytes via @ref m_tx_string and wait for "OK".
+   * @details Phase-2 helper for the AT LONG-data protocol.  Caller must
+   *          already have sent the header command and received the ">" prompt
+   *          via @ref execCommand before invoking this method.
+   * @note    Binary payloads that contain null bytes may be truncated if the
+   *          underlying @ref String::append stops at '\0'.
+   */
+  [[nodiscard]] ReturnCode execLongDataCommand(
+    const char* data,
+    std::size_t len,
+    uint32_t    timeout_ms = ESP::kDefaultTimeoutMs) noexcept;
 
-  // Event MqttConnected: Triggered when the ESP32 reports MQTT connection status (e.g., "MQTT CONNECTED").
-  void onMqttConn(String& msg);
+  // Busy-wait for a single matching frame; called by execCommand.
+  [[nodiscard]] ReturnCode waitForResponse(
+    const char* expected_response, uint32_t timeout_ms) noexcept;
 
-  // Event MqttRecv: Triggered when the ESP32 receives an MQTT message (e.g., "MQTT RECV: ...").
-  void onMqttRecvEvent(String& msg);
+  // Busy-wait across multiple frames; called by execCommandMulti.
+  [[nodiscard]] ReturnCode waitForResponseMulti(
+    const char* expected_response, uint32_t timeout_ms) noexcept;
 
-  // Event ListAp: Triggered when the ESP32 reports available Wi-Fi networks (e.g., "AP: ...").
-  void onListAp(String& msg);
+private: // Configuration helpers
 
-  // FSM state handlers
+  // Enable (true) or disable (false) command echo (ATE1 / ATE0).
+  [[nodiscard]] ReturnCode setEcho(bool enable) noexcept;
 
-  //State Init: Initial state after reset, waiting for "ready" event.
-  void enterStateInit();
-  void onStateInit();
+private: // URC event handlers
 
-  //State Idle: Normal operation state, waiting for commands or events.
-  void onStateIdle();
+  // "ready" — ESP32 has completed its reset sequence.
+  void onReady(String& msg) noexcept;
 
-  //State Busy: State when a command is being executed, waiting for response.
-  void enterStateBusy();
-  void onStateBusy();
-  void exitStateBusy();
+  // "WIFI CONNECTED" / "WIFI DISCONNECTED" — station link state changed.
+  void onConnected(String& msg) noexcept;
 
-  //State Error: State entered on error conditions, may attempt recovery or wait for reset.
-  void onStateError();
+  // "TIME_UPDATED" / "WIFI GOT IP" — IP or SNTP time is now available.
+  void onTimeUpdated(String& msg) noexcept;
 
+  // "+MQTTCONNECTED" / "+MQTTDISCONNECTED" — broker connection state changed.
+  void onMqttConn(String& msg) noexcept;
+
+  // "+MQTTSUBRECV" — inbound MQTT message on a subscribed topic.
+  void onMqttRecvEvent(String& msg) noexcept;
+
+  // "+CWLAP" — one AP entry from an ongoing AT+CWLAP scan.
+  void onListAp(String& msg) noexcept;
+
+private: // FSM state handlers
+
+  // Initial state: reset the module and wait for "ready".
+  void stateInit() noexcept;
+
+  // Idle state: normal operation, process commands and URCs.
+  void stateIdle() noexcept;
 };
 
-} /* namespace dev */
+} // namespace hel
 
 #endif /* DEVICES_ESP_AT_ESP_AT_HPP_ */

@@ -38,7 +38,7 @@ namespace hel
  * @note    Methods ending in @c FromISR are safe to call from interrupt context.
  *          All other methods must be called from task context only.
  */
-template<class T>
+template<typename T>
 class QueueBase :
   public iQueue<T>
 {
@@ -389,7 +389,7 @@ public:
  * @tparam  Capacity  Maximum number of items (compile-time constant, >0).
  * @ingroup FREERTOS_QUEUE
  */
-template<class T, uint32_t Capacity>
+template<typename T, uint32_t Capacity>
 class StaticQueue :
   public QueueBase<T>
 {
